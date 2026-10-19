@@ -1,11 +1,9 @@
-
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
-
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
   transports: ['websocket', 'polling']
@@ -15,43 +13,24 @@ const PORT = process.env.PORT || 3000;
 const ARENA = 'jujutsu-battle-royale';
 const players = new Map();
 
-app.get('/', (_req, res) => {
-  res.status(200).send('Jujutsu-Kaizen multiplayer server is running.');
-});
-
-app.get('/health', (_req, res) => {
-  res.status(200).json({ ok: true, players: players.size });
-});
+app.get('/', (_req, res) => res.status(200).send('Jujutsu-Kaizen multiplayer server is running.'));
+app.get('/health', (_req, res) => res.status(200).json({ ok: true, players: players.size }));
 
 function cleanText(value, max = 18) {
-  return String(value ?? '')
-    .replace(/[<>\u0000-\u001f]/g, '')
-    .trim()
-    .slice(0, max) || 'Feiticeiro';
+  return String(value ?? '').replace(/[<>\u0000-\u001f]/g, '').trim().slice(0, max) || 'Feiticeiro';
 }
-
 function numberIn(value, fallback, min, max) {
   const n = Number(value);
-  return Number.isFinite(n)
-    ? Math.max(min, Math.min(max, n))
-    : fallback;
+  return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;
 }
-
-function publicPlayer(id, p) {
-  return { id, ...p };
-}
-
+function publicPlayer(id, p) { return { id, ...p }; }
 function sendArenaState() {
-  io.to(ARENA).emit(
-    'arena-state',
-    [...players.entries()].map(([id, p]) => publicPlayer(id, p))
-  );
+  io.to(ARENA).emit('arena-state', [...players.entries()].map(([id, p]) => publicPlayer(id, p)));
 }
 
 io.on('connection', socket => {
   socket.on('join-arena', data => {
     socket.join(ARENA);
-
     const p = {
       name: cleanText(data?.name),
       skin: cleanText(data?.skin, 40) || 'sukuna_megumi',
@@ -63,26 +42,14 @@ io.on('connection', socket => {
       alive: true,
       face: numberIn(data?.face, 1, -1, 1)
     };
-
     players.set(socket.id, p);
-
-    socket.emit(
-      'arena-state',
-      [...players.entries()].map(([id, player]) =>
-        publicPlayer(id, player)
-      )
-    );
-
-    socket.to(ARENA).emit(
-      'player-joined',
-      publicPlayer(socket.id, p)
-    );
+    socket.emit('arena-state', [...players.entries()].map(([id, player]) => publicPlayer(id, player)));
+    socket.to(ARENA).emit('player-joined', publicPlayer(socket.id, p));
   });
 
   socket.on('player-state', data => {
     const p = players.get(socket.id);
     if (!p) return;
-
     p.x = numberIn(data?.x, p.x, 0, 10000);
     p.y = numberIn(data?.y, p.y, 0, 10000);
     p.hp = numberIn(data?.hp, p.hp, 0, 10000);
@@ -92,49 +59,45 @@ io.on('connection', socket => {
     p.skin = cleanText(data?.skin ?? p.skin, 40);
     p.tech = cleanText(data?.tech ?? p.tech, 40);
     p.face = numberIn(data?.face, p.face, -1, 1);
-
-    socket.to(ARENA).emit(
-      'player-state',
-      publicPlayer(socket.id, p)
-    );
+    socket.to(ARENA).emit('player-state', publicPlayer(socket.id, p));
   });
 
   socket.on('pvp-melee', data => {
     const attacker = players.get(socket.id);
     if (!attacker) return;
-
     const x = numberIn(data?.x, attacker.x, 0, 10000);
     const y = numberIn(data?.y, attacker.y, 0, 10000);
     const face = numberIn(data?.face, attacker.face, -1, 1);
-
     for (const [targetId, target] of players) {
       if (targetId === socket.id || !target.alive) continue;
-
-      const dx = target.x - x;
-      const dy = target.y - y;
-
+      const dx = target.x - x, dy = target.y - y;
       if (Math.hypot(dx, dy) <= 62 && dx * face > -18) {
-        io.to(targetId).emit('pvp-hit', {
-          targetId,
-          attackerId: socket.id,
-          damage: 8
-        });
+        io.to(targetId).emit('pvp-hit', { targetId, attackerId: socket.id, damage: 8 });
       }
     }
   });
 
-  // Transmite projéteis de técnicas especiais aos outros jogadores.
+  // Synchronize Ten Shadows summons so every player can see them in the arena.
+  socket.on('pvp-shadows', data => {
+    const p = players.get(socket.id);
+    if (!p || !data || !Array.isArray(data.shadows)) return;
+    const allowedKinds = new Set(['mahoraga','dog','nue','orochi','gama','bansho','datto','madoka','kangyu']);
+    const shadows = data.shadows.slice(0, 20).filter(s => s && allowedKinds.has(String(s.kind))).map(s => ({
+      kind: String(s.kind), group: String(s.group || s.kind).slice(0, 24),
+      x: numberIn(s.x, p.x, 0, 10000), y: numberIn(s.y, p.y, 0, 10000),
+      r: numberIn(s.r, 10, 4, 30), color: String(s.color || '#7b69a8').slice(0, 20),
+      hp: numberIn(s.hp, 1, 0, 10000), max: numberIn(s.max, 1, 1, 10000),
+      adapt: s.adapt == null ? null : String(s.adapt).slice(0, 32),
+      adaptTimer: numberIn(s.adaptTimer, 0, 0, 60)
+    }));
+    socket.to(ARENA).emit('pvp-shadows', { ownerId: socket.id, shadows });
+  });
+
+  // Technique projectiles are broadcast to the other clients; each target client
+  // simulates the projectile locally and applies damage when it collides.
   socket.on('pvp-technique', data => {
     const p = players.get(socket.id);
-
-    const allowed = [
-      'red', 'blue', 'purple', 'dismantle',
-      'cleave', 'fuga', 'fire_arrow',
-      'ten_shadows', 'innate', 'innate_area'
-    ];
-
-    if (!p || !data || !allowed.includes(data.type)) return;
-
+    if (!p || !data || !['red','blue','purple','dismantle','cleave','fuga','fire_arrow','ten_shadows','innate','innate_area'].includes(data.type)) return;
     const payload = {
       attackerId: socket.id,
       type: data.type,
@@ -146,15 +109,12 @@ io.on('connection', socket => {
       life: numberIn(data.life, 1.5, 0.1, 3),
       damage: numberIn(data.damage, 10, 1, 100)
     };
-
     socket.to(ARENA).emit('pvp-technique', payload);
   });
 
-  // Transmite ataques em área, incluindo expansões de domínio.
   socket.on('pvp-area', data => {
     const p = players.get(socket.id);
     if (!p || !data) return;
-
     socket.to(ARENA).emit('pvp-area', {
       attackerId: socket.id,
       type: cleanText(data.type, 32),
@@ -168,38 +128,24 @@ io.on('connection', socket => {
   socket.on('arena-death', () => {
     const p = players.get(socket.id);
     if (!p) return;
-
-    p.hp = 0;
-    p.alive = false;
-
-    socket.to(ARENA).emit(
-      'player-state',
-      publicPlayer(socket.id, p)
-    );
+    p.hp = 0; p.alive = false;
+    socket.to(ARENA).emit('player-state', publicPlayer(socket.id, p));
   });
-
   socket.on('player-respawn', data => {
     const p = players.get(socket.id);
     if (!p) return;
-
     p.x = numberIn(data?.x, p.x, 0, 10000);
     p.y = numberIn(data?.y, p.y, 0, 10000);
     p.hp = numberIn(data?.hp, p.maxHp, 1, 10000);
     p.maxHp = numberIn(data?.maxHp, p.maxHp, 1, 10000);
     p.alive = true;
-
-    socket.to(ARENA).emit(
-      'player-state',
-      publicPlayer(socket.id, p)
-    );
+    socket.to(ARENA).emit('player-state', publicPlayer(socket.id, p));
   });
-
   socket.on('leave-arena', () => {
     socket.leave(ARENA);
     players.delete(socket.id);
     socket.to(ARENA).emit('player-left', socket.id);
   });
-
   socket.on('disconnect', () => {
     players.delete(socket.id);
     socket.to(ARENA).emit('player-left', socket.id);
@@ -207,6 +153,4 @@ io.on('connection', socket => {
   });
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Jujutsu-Kaizen server listening on ${PORT}`);
-});
+server.listen(PORT, '0.0.0.0', () => console.log(`Jujutsu-Kaizen server listening on ${PORT}`));
