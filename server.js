@@ -67,9 +67,41 @@ app.put('/api/account/save',(req,res)=>{
   const slots=rawSlots.map(slot=>{ if(!slot||typeof slot!=='object'||!slot.avatar) return null; return { ...slot, level:Math.max(1,Math.min(100,Number(slot.level)||1)), yen:Math.max(0,Math.min(1e12,Number(slot.yen)||0)) }; });
   account.progress={slots,activeSlot:Math.max(0,Math.min(2,Number(progress.activeSlot)||0)),updatedAt:Date.now()}; persistAccounts(); return res.json({ok:true,updatedAt:account.progress.updatedAt});
 });
+const GRADE_NAMES=['Grau 4','Semi-Grau 3','Grau 3','Semi-Grau 2','Grau 2','Semi-Grau 1','Grau 1','Semi-Grau Especial','Grau Especial','Semi-Grau Calamidade','Grau Calamidade','Grau Divino'];
+function characterGrade(character){
+  if(Number.isFinite(Number(character?.gradeIndex)) && character?.gradeIndex!==undefined && character?.gradeIndex!==null){
+    return Math.max(0,Math.min(GRADE_NAMES.length-1,Math.floor(Number(character.gradeIndex))));
+  }
+  // Compatibility with older saves that predate the expanded grade exam system.
+  const legacy=String(character?.rank||character?.grade||'');
+  const byName=GRADE_NAMES.indexOf(legacy);
+  if(byName>=0)return byName;
+  const lvl=Math.max(1,Math.min(100,Number(character?.level)||1));
+  if(lvl>=65)return 8; if(lvl>=50)return 6; if(lvl>=35)return 5; if(lvl>=20)return 4; if(lvl>=10)return 2; return 0;
+}
+function publicRankCharacter(character){
+  const level=Math.max(1,Math.min(100,Number(character?.level)||1));
+  const gradeIndex=characterGrade(character);
+  return {character:String(character?.avatar?.name||character?.characterName||character?.name||'Feiticeiro').slice(0,40),level,gradeIndex,grade:GRADE_NAMES[gradeIndex],yen:Math.max(0,Math.min(1e12,Number(character?.yen)||0))};
+}
 app.get('/api/rankings',(_req,res)=>{
- const rows=[]; for(const a of accounts.values()){ const slots=a.progress?.slots||[]; const chars=slots.filter(Boolean); if(!chars.length) continue; const best=chars.reduce((x,y)=>(Number(y.level)||1)>(Number(x.level)||1)?y:x); const richest=chars.reduce((x,y)=>(Number(y.yen)||0)>(Number(x.yen)||0)?y:x); const level=Math.min(100,Number(best.level)||1); rows.push({nick:a.nick,level,rank:rankForLevel(level),yen:Math.max(0,Number(richest.yen)||0)}); }
- res.json({level:[...rows].sort((a,b)=>b.level-a.level||a.nick.localeCompare(b.nick)).slice(0,50),yen:[...rows].sort((a,b)=>b.yen-a.yen||a.nick.localeCompare(b.nick)).slice(0,50)});
+ const levelRows=[],yenRows=[],gradeRows=[];
+ for(const account of accounts.values()){
+  const chars=(account.progress?.slots||[]).filter(slot=>slot&&typeof slot==='object'&&slot.avatar).map(publicRankCharacter);
+  if(!chars.length)continue;
+  const bestLevel=chars.reduce((a,b)=>b.level>a.level?b:a);
+  const richest=chars.reduce((a,b)=>b.yen>a.yen?b:a);
+  const bestGrade=chars.reduce((a,b)=>b.gradeIndex>a.gradeIndex?b:a);
+  levelRows.push({nick:account.nick,...bestLevel});
+  yenRows.push({nick:account.nick,...richest});
+  gradeRows.push({nick:account.nick,...bestGrade});
+ }
+ const sortNick=(a,b)=>a.nick.localeCompare(b.nick,'pt-BR');
+ res.json({
+  yen:yenRows.sort((a,b)=>b.yen-a.yen||sortNick(a,b)).slice(0,50),
+  grade:gradeRows.sort((a,b)=>b.gradeIndex-a.gradeIndex||sortNick(a,b)).slice(0,50),
+  level:levelRows.sort((a,b)=>b.level-a.level||sortNick(a,b)).slice(0,50)
+ });
 });
 app.get('/api/party/list',(_req,res)=>res.json({rooms:[...parties.values()].map(partyPublic)}));
 function cleanNumber(value, fallback = 0, min = -10000, max = 10000) {
