@@ -138,11 +138,11 @@ function sprite(g,x,y,s,flash=false,animate=false,skinOverride=null){
  const skinId=skinOverride||avatar.skinPreset,image=skinImages[skinId]||skinImages.sukuna_megumi;
  if(!image||!image.complete||!image.naturalWidth)return;
  g.save();g.imageSmoothingEnabled=false;
- const heian=skinId==='sukuna_heian',growth=heian?1.13:1,scale=Math.min(44*s/image.naturalWidth,50*s/image.naturalHeight)*growth,w=image.naturalWidth*scale,h=image.naturalHeight*scale;
+ const heian=skinId==='sukuna_heian',growth=heian?1.22:1,scale=Math.min(44*s/image.naturalWidth,50*s/image.naturalHeight)*growth,w=image.naturalWidth*scale,h=image.naturalHeight*scale;
  const t=performance.now()/1000,moving=!!(animate&&player.moving),attacking=!!(animate&&player.attack>0),walkPhase=t*15;
- const bob=animate?(moving?Math.abs(Math.sin(walkPhase))*2:Math.sin(t*3.2)*.65):0;
- const lean=animate?(attacking?(player.face||1)*(.10+Math.sin(t*42)*.045):moving?(player.face||1)*Math.sin(walkPhase)*.035:Math.sin(t*1.5)*.008):0;
- const squash=animate&&attacking?1.025+Math.sin(t*38)*.018:1,lunge=animate&&attacking?(player.face||1)*Math.sin(t*24)*2.2*s:0;
+ const bob=animate?(moving?Math.abs(Math.sin(walkPhase))*2.8:Math.sin(t*3.2)*.9):0;
+ const lean=animate?(attacking?(player.face||1)*(.15+Math.sin(t*42)*.06):moving?(player.face||1)*Math.sin(walkPhase)*.035:Math.sin(t*1.5)*.008):0;
+ const squash=animate&&attacking?1.025+Math.sin(t*38)*.018:1,lunge=animate&&attacking?(player.face||1)*Math.sin(t*24)*3.1*s:0;
  g.translate(x+24*s+lunge,y+28*s+bob);g.rotate(lean);
  if(animate&&heian){
   const swing=moving?Math.sin(walkPhase)*2.5:attacking?Math.sin(t*42)*5:Math.sin(t*2.1)*.8,sy=-h*.03,upper=h*.13,fore=h*.10,side=w*.25,pixel=Math.max(1,Math.round(1.15*s)),reach=attacking?-.20:0;
@@ -150,6 +150,27 @@ function sprite(g,x,y,s,flash=false,animate=false,skinOverride=null){
   arm(-side,sy,-.38+swing*.018,upper,fore,'#9e3b43');arm(side,sy,Math.PI+.38-swing*.018,upper,fore,'#9e3b43');arm(-side,sy+h*.10,.48-swing*.018+reach,upper*.94,fore*.92,'#b94c4d');arm(side,sy+h*.10,Math.PI-.48+swing*.018-reach,upper*.94,fore*.92,'#b94c4d');
  }
  if(flash){g.globalAlpha=.78;g.filter='brightness(1.5)'}g.drawImage(image,-w/2,-h*squash/2,w,h*squash);g.filter='none';g.globalAlpha=1;
+ // Animação pixelada em primeiro plano: quatro braços, mãos e passos do Sukuna Heian.
+ if(animate&&heian){
+  const phase=moving?Math.sin(walkPhase):Math.sin(t*2.1)*.12;
+  const punch=attacking?Math.sin(t*42):0,dir=player.face||1;
+  const px=Math.max(1,Math.round(1.25*s)),armLen=w*.24,armY=-h*.03;
+  const limb=(side,angle,reach,shade)=>{
+   g.save();g.translate(side*w*.19,armY+(side<0?h*.10:0));g.rotate(angle);
+   g.fillStyle='#24151e';g.fillRect(-px,-px,armLen+px*2,px*5);
+   g.fillStyle='#8f3540';g.fillRect(0,-px,armLen,px*4);
+   g.fillStyle='#e8a18a';g.fillRect(armLen-px,-px,px*4,px*5);
+   g.fillStyle='#f2b39a';g.fillRect(armLen+px,-px,px*2,px*3);
+   g.fillStyle=shade;g.fillRect(armLen*.35,0,px*3,px);
+   g.restore();
+  };
+  limb(-1,-.32+phase*.20-punch*.30,'#b64a50');
+  limb(1,Math.PI+.32-phase*.20-punch*.30,'#b64a50');
+  limb(-1,.48-phase*.28+(attacking?-.95:0),'#762b36');
+  limb(1,Math.PI-.48+phase*.28+(attacking?.95:0),'#762b36');
+  // pequenos passos em pixels sob o manto
+  if(moving){g.fillStyle='#17121b';g.fillRect(-w*.20+phase*px,-h*.03,px*5,px*3);g.fillRect(w*.04-phase*px,-h*.025,px*5,px*3)}
+ }
  if(animate&&heian&&attacking){g.save();g.globalCompositeOperation='lighter';g.globalAlpha=.55;g.strokeStyle='#ff3858';g.lineWidth=Math.max(1,2*s);g.beginPath();const dir=player.face||1;g.moveTo(dir*w*.18,-h*.04);g.lineTo(dir*w*.68,-h*.20+Math.sin(t*50)*3*s);g.stroke();g.globalAlpha=.85;g.strokeStyle='#ffe4e9';g.lineWidth=Math.max(1,.7*s);g.beginPath();g.moveTo(dir*w*.23,-h*.05);g.lineTo(dir*w*.61,-h*.18+Math.sin(t*50)*3*s);g.stroke();g.restore()}
  g.restore()
 }
